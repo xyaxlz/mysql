@@ -1,0 +1,3 @@
+[dbtest]
+db1v.infra.bjac.pdtv.it
+db2v.infra.bjac.pdtv.it

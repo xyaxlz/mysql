@@ -1,0 +1,112 @@
+#!/bin/bash
+
+usage()
+{
+    cat <<EOF
+MySQL 安装脚本使用说明
+Usage:$0 -t [master|slave] 
+   -h     help              
+   -t     安装的数据库的类型master或者slave。 区别:master
+	  的server-id为1,salve的server-id为2
+   -P     数据库端口
+   -p     mysql root用户密码 
+EOF
+exit
+}
+[ $# == 0 ] && usage 
+
+
+while getopts ":ht:p:n:" opts;do
+  case $opts in
+	h)
+		usage
+		;;
+	t)
+		TYPE=$OPTARG
+		if  ! [[ $TYPE == 'master' || $TYPE == 'slave' ]];then
+			usage	
+		
+		fi
+		;;
+	p)
+		DBPWD=$OPTARG
+		;;
+	P)
+		DBPORT=$OPTARG
+		;;
+	*)
+		-$OPTARG unvalid
+		usage;;
+  esac
+done
+
+
+
+if ! expr $DBPORT + 0 &>/dev/null;then
+        echo "$DBPORT is not number"    
+        exit
+fi
+
+
+
+#install mysql#
+
+useradd mysql
+
+mkdir  -p /data/mysql/$DBPWD/mysqldata/data    
+mkdir  -p /data/mysql/$DBPWD/mysqldata/tmp
+mkdir  -p /data/mysql/$DBPWD/mysqldata/ibdata
+mkdir  -p /data/mysql/$DBPWD/mysqllog/redolog
+mkdir  -p /data/mysql/$DBPWD/mysqllog/slowquery/
+mkdir  -p /data/mysql/$DBPWD/mysqllog/binlog/
+mkdir  -p /data/mysql/$DBPWD/mysqllog/relaylog/
+mkdir  -p /data/mysql/$DBPWD/etc/
+
+chown mysql.mysql -R /data/mysql
+
+
+\cp -f  /usr/local/mysql/support-files/mysql.server  /etc/init.d/mysqld
+sed -i  's/^basedir=/basedir=\/usr\/local\/mysql/g' /etc/init.d/mysqld
+sed -i 's/^datadir=/datadir=\/data\/mysql\/mysqldata\/data/g' /etc/init.d/mysqld
+chmod +x /etc/init.d/mysqld
+chkconfig  --add mysqld 
+chkconfig mysqld on
+
+server_id=$(($((RANDOM%9000))+1000))
+
+sed -i "s/server-id.*/server-id = $server_id/g" /etc/my.cnf
+
+MEM1=`awk 'NR==1{print int($2/1024*0.6)}' /proc/meminfo`
+BMEM1=`echo $MEM1|awk '{if($1 > 1024) {printf "%d%s" ,int($1/1024),"G" } else {printf "%d%s",($1),"M"} }'`
+
+\cp -a mysource /etc/my.cnf
+sed -i "/^innodb_buffer_pool_size/ c innodb_buffer_pool_size = ${BMEM1}" /etc/my.cnf
+
+mysqldir=/usr/local/mysql/bin
+$mysqldir/mysql  -e "delete from mysql.user where user='';"
+$mysqldir/mysql  -e "delete from mysql.user where host='';"
+$mysqldir/mysql  -e "GRANT RELOAD, SUPER, LOCK TABLES, REPLICATION CLIENT, CREATE TABLESPACE ON *.* TO 'dbback'@'localhost' IDENTIFIED BY 'dbback'"
+$mysqldir/mysqladmin  password  $DBPWD
+
+if [[ $DBPWD == '' ]];then
+	/usr/local/mysql${NUM}/bin/mysql   -e "use mysql"
+	FLAG=$?
+else
+	/usr/local/mysql${NUM}/bin/mysql  -uroot -p$DBPWD  -e "use mysql"
+	FLAG=$?
+fi
+
+
+
+if [[ $FLAG == 0  ]];then
+	echo -e "\033[31m  数据库安装完毕 \033[0m"  
+	echo -e "\033[32m 2、mysql服务管理工具使用方法：/etc/init.d/mysqld${NUM}  {start|stop|restart|reload|force-reload|status}  \033[0m"  
+	echo -e "\033[32m 3、mysql命令的全路径: /usr/local/mysql${NUM}/bin/mysql  \033[0m"  
+	echo -e "\033[32m 4、重开一个session，可使用mysql -S  /tmp/mysql${NUM}.sock  -uroot -p 进入mysql。  \033[0m"  
+	echo -e "\033[32m 5、数据库的root密码: $DBPWD  \033[0m" 
+	echo -e "\033[32m 6、数据库性能数据收集脚本已经成功部署，默认5分钟执行一次，请将/dbhome/tmp 中的数据文件定时传到manager上以便及时监控问题  \033[0m" 
+else
+	echo -e "\033[31m \033[05m 数据库安装失败 \033[0m" 
+	exit 1
+fi
+
